@@ -273,6 +273,31 @@
 <script>
 const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyVvvfzJRnSKcCuS8uSVklHqRxow1Mw-AdX3z_UzFZr3IPRP6kLtC0yywszJDfSjffT/exec';
 
+// Google Sheets peut retourner la date comme objet Date sérialisé ou string
+// On normalise toujours en YYYY-MM-DD local
+function parseSheetDate(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim();
+  // Déjà au bon format
+  if (s.match(/^\d{4}-\d{2}-\d{2}$/)) return s;
+  // Format DD/MM/YYYY ou MM/DD/YYYY venant de Sheets
+  if (s.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+    const parts = s.split('/');
+    // Google Sheets exporte en M/D/YYYY
+    const d = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]));
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  // Timestamp numérique (serial date Google Sheets)
+  if (!isNaN(s) && s.length < 6) {
+    const d = new Date((parseFloat(s) - 25569) * 86400 * 1000);
+    return d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0') + '-' + String(d.getUTCDate()).padStart(2,'0');
+  }
+  // Essai générique — extraire YYYY-MM-DD si présent dans la string
+  const m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[0];
+  return '';
+}
+
 let trips = [];
 let selectedType = 'Personnel';
 let currentFilter = 'all';
@@ -280,7 +305,22 @@ let historyFilter = 'all';
 let editingId = null;
 let isSyncing = false;
 
-function today() { return new Date().toISOString().split('T')[0]; }
+// Retourne la date locale (fuseau horaire de l'appareil) au format YYYY-MM-DD
+function today() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
+// Formate une date YYYY-MM-DD sans décalage de fuseau horaire
+function formatDate(dateStr, opts) {
+  if (!dateStr || typeof dateStr !== 'string' || !dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) return 'Date invalide';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d); // constructeur local, pas UTC
+  return date.toLocaleDateString('fr-CA', opts);
+}
 
 async function init() {
   document.getElementById('f-date').value = today();
@@ -315,13 +355,13 @@ async function loadFromSheets() {
     const data = await res.json();
     trips = data.map(row => ({
       id: String(row.id),
-      date: String(row.date || ''),
+      date: parseSheetDate(row.date),
       type: String(row.type || ''),
       kmStart: row.kmStart !== '' && row.kmStart !== null ? parseFloat(row.kmStart) : null,
       kmEnd: row.kmEnd !== '' && row.kmEnd !== null ? parseFloat(row.kmEnd) : null,
       total: row.total !== '' && row.total !== null && row.total !== 'En cours' ? parseFloat(row.total) : null,
       note: String(row.note || '')
-    })).filter(t => t.date);
+    })).filter(t => t.date && t.date.match(/^\d{4}-\d{2}-\d{2}$/));
     trips.sort((a,b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
     localStorage.setItem('km-trips-cache', JSON.stringify(trips));
     setSyncStatus('ok');
@@ -489,7 +529,7 @@ function renderHistory() {
   source.forEach(tr => { if (!groups[tr.date]) groups[tr.date] = []; groups[tr.date].push(tr); });
   const sortedDates = Object.keys(groups).sort((a,b) => b.localeCompare(a));
   list.innerHTML = sortedDates.map(date => {
-    const label = new Date(date + 'T00:00:00').toLocaleDateString('fr-CA', {weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    const label = formatDate(date, {weekday:'long',day:'numeric',month:'long',year:'numeric'});
     const groupTrips = groups[date];
     const groupTotal = groupTrips.reduce((s,tr) => s + (tr.total || 0), 0);
     const hasPending = groupTrips.some(tr => tr.total === null);
@@ -506,7 +546,7 @@ function renderHistory() {
 function buildTripCard(trip) {
   const isPending = trip.total === null;
   const ip = trip.type === 'Personnel';
-  const dateStr = new Date(trip.date + 'T00:00:00').toLocaleDateString('fr-CA', {weekday:'short',day:'numeric',month:'short'});
+  const dateStr = formatDate(trip.date, {weekday:'short',day:'numeric',month:'short'});
   const kmDisplay = isPending ? 'En cours' : trip.total.toFixed(1);
   return `<div class="trip-card ${isPending?'pending':''}">
     <div class="trip-type-badge ${ip?'personal':'work'}">${ip?'🟠':'🔵'}</div>
