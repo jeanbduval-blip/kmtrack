@@ -130,9 +130,74 @@
   .empty-state { text-align: center; padding: 48px 20px; color: var(--text2); }
   .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
   .empty-state p { font-size: 15px; }
+
+  /* PIN SCREEN */
+  .pin-overlay {
+    position: fixed; inset: 0; background: var(--bg);
+    z-index: 1000; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; padding: 32px;
+  }
+  .pin-overlay.hidden { display: none; }
+  .pin-logo { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 8px; }
+  .pin-logo span { color: var(--accent); }
+  .pin-subtitle { font-size: 14px; color: var(--text2); margin-bottom: 40px; }
+  .pin-dots { display: flex; gap: 14px; margin-bottom: 36px; }
+  .pin-dot {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid var(--border); background: transparent;
+    transition: all 0.2s;
+  }
+  .pin-dot.filled { background: var(--accent); border-color: var(--accent); }
+  .pin-dot.error { background: var(--accent2); border-color: var(--accent2); animation: shake 0.4s ease; }
+  @keyframes shake {
+    0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)} 40%{transform:translateX(6px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(4px)}
+  }
+  .pin-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 12px; width: 100%; max-width: 280px;
+  }
+  .pin-key {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; height: 70px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 600; cursor: pointer;
+    transition: all 0.15s; color: var(--text);
+    user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  .pin-key:active { background: var(--border); transform: scale(0.94); }
+  .pin-key.empty { background: transparent; border-color: transparent; cursor: default; }
+  .pin-key.delete { font-size: 18px; color: var(--text2); }
+  .pin-error-msg { font-size: 13px; color: var(--accent2); margin-top: 20px; height: 18px; text-align: center; }
 </style>
 </head>
 <body>
+
+<!-- PIN SCREEN -->
+<div class="pin-overlay" id="pin-overlay">
+  <div class="pin-logo">Km<span>Track</span></div>
+  <div class="pin-subtitle">Entrez votre code PIN</div>
+  <div class="pin-dots" id="pin-dots">
+    <div class="pin-dot" id="pd0"></div>
+    <div class="pin-dot" id="pd1"></div>
+    <div class="pin-dot" id="pd2"></div>
+    <div class="pin-dot" id="pd3"></div>
+  </div>
+  <div class="pin-grid">
+    <button class="pin-key" onclick="pinPress('1')">1</button>
+    <button class="pin-key" onclick="pinPress('2')">2</button>
+    <button class="pin-key" onclick="pinPress('3')">3</button>
+    <button class="pin-key" onclick="pinPress('4')">4</button>
+    <button class="pin-key" onclick="pinPress('5')">5</button>
+    <button class="pin-key" onclick="pinPress('6')">6</button>
+    <button class="pin-key" onclick="pinPress('7')">7</button>
+    <button class="pin-key" onclick="pinPress('8')">8</button>
+    <button class="pin-key" onclick="pinPress('9')">9</button>
+    <button class="pin-key empty"></button>
+    <button class="pin-key" onclick="pinPress('0')">0</button>
+    <button class="pin-key delete" onclick="pinDelete()">⌫</button>
+  </div>
+  <div class="pin-error-msg" id="pin-error"></div>
+</div>
 
 <div class="header">
   <div class="header-title">Km<span>Track</span></div>
@@ -272,6 +337,8 @@
 
 <script>
 const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyVvvfzJRnSKcCuS8uSVklHqRxow1Mw-AdX3z_UzFZr3IPRP6kLtC0yywszJDfSjffT/exec';
+const APP_PIN = '1238';
+const PIN_KEY = 'kmtrack-auth';
 
 // Google Sheets peut retourner la date comme objet Date sérialisé ou string
 // On normalise toujours en YYYY-MM-DD local
@@ -321,6 +388,63 @@ function formatDate(dateStr, opts) {
   const date = new Date(y, m - 1, d); // constructeur local, pas UTC
   return date.toLocaleDateString('fr-CA', opts);
 }
+
+// ── PIN ──────────────────────────────────────────────────────────
+let pinEntry = '';
+
+function checkPinAuth() {
+  const saved = localStorage.getItem(PIN_KEY);
+  if (saved) {
+    try {
+      const { ts } = JSON.parse(saved);
+      if (Date.now() - ts < 12 * 60 * 60 * 1000) return true;
+    } catch(e) {}
+  }
+  return false;
+}
+
+function pinPress(digit) {
+  if (pinEntry.length >= APP_PIN.length) return;
+  pinEntry += digit;
+  updatePinDots();
+  if (pinEntry.length === APP_PIN.length) setTimeout(validatePin, 120);
+}
+
+function pinDelete() {
+  pinEntry = pinEntry.slice(0, -1);
+  updatePinDots();
+  document.getElementById('pin-error').textContent = '';
+}
+
+function updatePinDots(isError) {
+  for (let i = 0; i < APP_PIN.length; i++) {
+    const dot = document.getElementById('pd' + i);
+    dot.classList.toggle('filled', i < pinEntry.length);
+    dot.classList.toggle('error', !!isError);
+  }
+}
+
+function validatePin() {
+  if (pinEntry === APP_PIN) {
+    localStorage.setItem(PIN_KEY, JSON.stringify({ ts: Date.now() }));
+    document.getElementById('pin-overlay').classList.add('hidden');
+    init();
+  } else {
+    updatePinDots(true);
+    document.getElementById('pin-error').textContent = 'Code incorrect, réessayez';
+    pinEntry = '';
+    setTimeout(() => updatePinDots(false), 700);
+  }
+}
+
+// ── STARTUP ───────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  if (checkPinAuth()) {
+    document.getElementById('pin-overlay').classList.add('hidden');
+    init();
+  }
+  // else PIN screen stays visible
+});
 
 async function init() {
   document.getElementById('f-date').value = today();
@@ -641,7 +765,7 @@ function showToast(msg, type = 'success') {
   setTimeout(() => t.classList.remove('show'), 2800);
 }
 
-init();
+// init() est appelé via DOMContentLoaded ou après validation du PIN
 </script>
 </body>
 </html>
