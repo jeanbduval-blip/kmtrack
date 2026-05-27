@@ -299,12 +299,11 @@
       <label class="form-label">Date</label>
       <input type="date" class="form-input" id="f-date">
     </div>
-    <!-- Type toggle — visible seulement en mode édition manuelle -->
+    <!-- Type toggle — caché, toujours Travail -->
     <div class="form-group" id="type-group" style="display:none">
       <label class="form-label">Type</label>
       <div class="type-toggle">
-        <button class="type-btn active-personal" id="btn-personal" onclick="selectType('Personnel')">🟠 Personnel</button>
-        <button class="type-btn" id="btn-work" onclick="selectType('Travail')">🔵 Travail</button>
+        <button class="type-btn active-work" id="btn-work" onclick="selectType('Travail')">🔵 Travail</button>
       </div>
     </div>
     <div class="form-group">
@@ -398,7 +397,7 @@ function checkPinAuth() {
   if (saved) {
     try {
       const { ts } = JSON.parse(saved);
-      if (Date.now() - ts < 12 * 60 * 60 * 1000) return true;
+      if (Date.now() - ts < 1 * 60 * 60 * 1000) return true;
     } catch(e) {}
   }
   return false;
@@ -557,8 +556,8 @@ function closeModalOutside(e) { if (e.target === document.getElementById('modal-
 
 function selectType(type) {
   selectedType = type;
-  document.getElementById('btn-personal').className = 'type-btn' + (type === 'Personnel' ? ' active-personal' : '');
-  document.getElementById('btn-work').className = 'type-btn' + (type === 'Travail' ? ' active-work' : '');
+  const btnW = document.getElementById('btn-work');
+  if (btnW) btnW.className = 'type-btn' + (type === 'Travail' ? ' active-work' : '');
 }
 
 function updateTotal() {
@@ -676,7 +675,6 @@ async function autoCalcPerso(date) {
   } catch(e) {
     // Silencieux — le trajet travail est déjà sauvegardé
   }
-}
 }
 
 async function deleteTrip(id) {
