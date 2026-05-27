@@ -183,18 +183,18 @@
     <div class="pin-dot" id="pd3"></div>
   </div>
   <div class="pin-grid">
-    <button class="pin-key" onclick="pinPress('1')">1</button>
-    <button class="pin-key" onclick="pinPress('2')">2</button>
-    <button class="pin-key" onclick="pinPress('3')">3</button>
-    <button class="pin-key" onclick="pinPress('4')">4</button>
-    <button class="pin-key" onclick="pinPress('5')">5</button>
-    <button class="pin-key" onclick="pinPress('6')">6</button>
-    <button class="pin-key" onclick="pinPress('7')">7</button>
-    <button class="pin-key" onclick="pinPress('8')">8</button>
-    <button class="pin-key" onclick="pinPress('9')">9</button>
+    <button class="pin-key" data-digit="1">1</button>
+    <button class="pin-key" data-digit="2">2</button>
+    <button class="pin-key" data-digit="3">3</button>
+    <button class="pin-key" data-digit="4">4</button>
+    <button class="pin-key" data-digit="5">5</button>
+    <button class="pin-key" data-digit="6">6</button>
+    <button class="pin-key" data-digit="7">7</button>
+    <button class="pin-key" data-digit="8">8</button>
+    <button class="pin-key" data-digit="9">9</button>
     <button class="pin-key empty"></button>
-    <button class="pin-key" onclick="pinPress('0')">0</button>
-    <button class="pin-key delete" onclick="pinDelete()">⌫</button>
+    <button class="pin-key" data-digit="0">0</button>
+    <button class="pin-key delete" id="pin-delete-btn">⌫</button>
   </div>
   <div class="pin-error-msg" id="pin-error"></div>
 </div>
@@ -235,7 +235,7 @@
     </div>
   </div>
   <div class="section-header"><div class="section-title">Aujourd'hui</div></div>
-  <button class="refresh-btn" id="refresh-btn" onclick="loadFromSheets()">
+  <button class="refresh-btn" id="refresh-btn" onclick="loadFromSheets()" style="margin-bottom:16px">
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
     Rafraîchir
   </button>
@@ -294,12 +294,13 @@
 <div class="modal-overlay" id="modal-overlay" onclick="closeModalOutside(event)">
   <div class="modal">
     <div class="modal-handle"></div>
-    <div class="modal-title" id="modal-title">Nouveau trajet</div>
+    <div class="modal-title" id="modal-title">Nouveau trajet Travail</div>
     <div class="form-group">
       <label class="form-label">Date</label>
       <input type="date" class="form-input" id="f-date">
     </div>
-    <div class="form-group">
+    <!-- Type toggle — visible seulement en mode édition manuelle -->
+    <div class="form-group" id="type-group" style="display:none">
       <label class="form-label">Type</label>
       <div class="type-toggle">
         <button class="type-btn active-personal" id="btn-personal" onclick="selectType('Personnel')">🟠 Personnel</button>
@@ -327,7 +328,7 @@
     </div>
     <div class="form-group">
       <label class="form-label">Note</label>
-      <input type="text" class="form-input" id="f-note" placeholder="Ex: Client ABC, épicerie...">
+      <input type="text" class="form-input" id="f-note" placeholder="Ex: Client ABC, réunion...">
     </div>
     <button class="submit-btn" id="submit-btn" onclick="submitTrip()">✓ Soumettre le trajet</button>
   </div>
@@ -439,6 +440,12 @@ function validatePin() {
 
 // ── STARTUP ───────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  // Wire PIN digit buttons via event listeners (évite le problème de timing)
+  document.querySelectorAll('.pin-key[data-digit]').forEach(btn => {
+    btn.addEventListener('click', () => pinPress(btn.getAttribute('data-digit')));
+  });
+  document.getElementById('pin-delete-btn').addEventListener('click', pinDelete);
+
   if (checkPinAuth()) {
     document.getElementById('pin-overlay').classList.add('hidden');
     init();
@@ -518,10 +525,11 @@ function openModal() {
   document.getElementById('f-note').value = '';
   document.getElementById('f-total').textContent = '—';
   document.getElementById('f-total').className = 'total-preview-value';
-  document.getElementById('modal-title').textContent = 'Nouveau trajet';
+  document.getElementById('modal-title').textContent = 'Nouveau trajet Travail';
   document.getElementById('submit-btn').textContent = '✓ Soumettre le trajet';
   document.getElementById('submit-btn').className = 'submit-btn';
-  selectType('Personnel');
+  document.getElementById('type-group').style.display = 'none';
+  selectType('Travail');
   document.getElementById('modal-overlay').classList.add('open');
 }
 
@@ -539,6 +547,7 @@ function openEditModal(id) {
   document.getElementById('modal-title').textContent = 'Modifier le trajet';
   document.getElementById('submit-btn').textContent = '✏️ Enregistrer les modifications';
   document.getElementById('submit-btn').className = 'submit-btn editing';
+  document.getElementById('type-group').style.display = 'block'; // show type when editing
   selectType(trip.type);
   document.getElementById('modal-overlay').classList.add('open');
 }
@@ -596,11 +605,78 @@ async function submitTrip() {
     await sendToSheets(tripData);
     closeModal();
     await loadFromSheets();
-    showToast(editingId !== null ? '✏️ Trajet modifié!' : '✓ Trajet ajouté!', 'success');
+    showToast(editingId !== null ? '✏️ Trajet modifié!' : '✓ Trajet Travail ajouté!', 'success');
+
+    // ── AUTO PERSO CALC ──────────────────────────────────────────
+    // Déclenche seulement si c'est un trajet Travail avec KM arrivée
+    if (selectedType === 'Travail' && kmEnd !== null) {
+      await autoCalcPerso(date);
+    }
   } catch(e) {
     showToast('⚠️ Erreur de connexion, réessayez', 'error-toast');
   }
   btn.disabled = false;
+}
+
+// ── AUTO CALCUL KM PERSO ─────────────────────────────────────────
+async function autoCalcPerso(date) {
+  // Tous les trajets travail du jour avec KM arrivée
+  const workToday = trips
+    .filter(tr => tr.date === date && tr.type === 'Travail' && tr.kmStart !== null && tr.kmEnd !== null)
+    .sort((a,b) => a.kmStart - b.kmStart); // ordre chronologique par KM
+
+  if (workToday.length === 0) return;
+
+  // KM départ du tout premier trajet du jour
+  const firstKmStart = workToday[0].kmStart;
+  // KM arrivée du tout dernier trajet du jour
+  const lastKmEnd = workToday[workToday.length - 1].kmEnd;
+  // Total KM travail du jour
+  const workKm = workToday.reduce((s, tr) => s + tr.total, 0);
+
+  // Dernier KM enregistré AVANT aujourd'hui (toutes catégories)
+  const prevTrips = trips
+    .filter(tr => tr.date < date && tr.kmEnd !== null)
+    .sort((a,b) => b.date.localeCompare(a.date) || b.kmEnd - a.kmEnd);
+
+  if (prevTrips.length === 0) return; // pas de référence, impossible de calculer
+
+  const prevKmEnd = prevTrips[0].kmEnd;
+
+  // Écart odomètre depuis hier
+  const ecart = firstKmStart - prevKmEnd;
+  if (ecart <= 0) return; // aucun écart, pas de km perso
+
+  const persoKm = Math.max(0, ecart);
+
+  // Créer ou mettre à jour le trajet perso du jour
+  const existingPerso = trips.find(tr => tr.date === date && tr.type === 'Personnel');
+
+  // Si le trajet perso existant a le même total → rien à faire
+  if (existingPerso && Math.abs(existingPerso.total - persoKm) < 0.1) return;
+
+  try {
+    if (existingPerso) {
+      await sendToSheets({
+        action: 'update', id: existingPerso.id,
+        date, type: 'Personnel',
+        kmStart: prevKmEnd, kmEnd: firstKmStart,
+        total: persoKm, note: 'Usage personnel (auto)'
+      });
+    } else {
+      await sendToSheets({
+        action: 'add', id: String(Date.now() + 1),
+        date, type: 'Personnel',
+        kmStart: prevKmEnd, kmEnd: firstKmStart,
+        total: persoKm, note: 'Usage personnel (auto)'
+      });
+    }
+    await loadFromSheets();
+    showToast('🟠 ' + persoKm.toFixed(1) + ' km perso calculés automatiquement!', 'info');
+  } catch(e) {
+    // Silencieux — le trajet travail est déjà sauvegardé
+  }
+}
 }
 
 async function deleteTrip(id) {
